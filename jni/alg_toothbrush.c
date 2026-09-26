@@ -37,9 +37,9 @@ static const short FaceRollBound[2][2][3] = {
 #define THRESHHOLDYUP     45
 #define ANCHOR8_HOLD_TIME 3.5
 #define MIDDLE_THRESHOLD  30
+#define FD_TIME           0.25
 #define ACCY_THRESHOLD    0.3
 #define YYAW_THRESHOLD     6
-#define FD_TIME           0.25
 #define JUSTSUM_TIME      1.0
 
 static inline void win16_update3_var(
@@ -616,7 +616,7 @@ void init(void)
 void post(void)
 {
   V1 = face;//delta_t * 1000;
-  V2 = newface;
+  V2 = newface;//不能动！！！
   V3 = yaw;
   V4 = lr * 100 + ps * 1; 
   V5 = pitch;
