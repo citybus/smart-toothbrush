@@ -1,0 +1,12 @@
+libs
+obj
+dll
+freq-8018-m3
+output
+report
+*.exe
+*.pyc
+*.csv
+*.time.def
+*.face.def
+

@@ -1,0 +1,9 @@
+TH --start 1 --stop 15 --step 1
+FACETH --start 5 --stop 30 --step 1
+THRESHHOLDYUP --start 5 --stop 45 --step 1
+ANCHOR8_HOLD_TIME --start 0.5 --stop 3.5 --step 0.1 --float
+MIDDLE_THRESHOLD --start 0 --stop 35 --step 1
+FD_TIME --start 0.1 --stop 0.9 --step 0.1 --float
+ACCY_THRESHOLD --start 0.1 --stop 0.9 --step 0.1 --float
+YYAW_THRESHOLD --start 0 --stop 25 --step 1 
+JUSTSUM_TIME --start 0.5 --stop 3.5 --step 0.1 --float

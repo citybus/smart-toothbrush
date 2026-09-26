@@ -1,0 +1,4 @@
+TH --start 5 --stop 15 --step 1
+FACETH --start 5 --stop 30 --step 1
+THRESHHOLDYUP --start 5 --stop 45 --step 1
+ANCHOR8_HOLD_TIME --start 0.5 --stop 3.5 --step 0.1 --float
