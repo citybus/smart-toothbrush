@@ -365,6 +365,14 @@ def sweep_overall(args, vals):
     output_dir = os.path.join(ROOT, "output", args.subdir)
     input_dir = os.path.join(ROOT, "input", args.subdir)
 
+    if not os.path.exists(output_dir):
+        if not os.path.exists(input_dir):
+            print(f"[sweep] 输入目录不存在: {input_dir}")
+            return 1
+        import shutil
+        shutil.copytree(input_dir, output_dir)
+        print(f"[sweep] 输出目录不存在，已根据输入目录创建: {output_dir}")
+
     def_token = None
     all_def_params = {}
     for fname in os.listdir(output_dir):
