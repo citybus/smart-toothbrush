@@ -1,6 +1,5 @@
 clear;
 %左外->右内->-左外->右外->左外->左内->右内->左内->右外->左内->左上咀嚼面->右上咀嚼面->右下咀嚼面->左下咀嚼面->中上外侧->中上内侧->中下外侧->中下内侧
-%valid:1 2 1 2 1 1 2 1 2 1 0 0 0 0 0 0 0 0
 datafile = '..\output\N1\20250515_102003_2.txt';
 % readmatrix requires R2019a+; fall back to dlmread on older releases (R2018b)
 if exist('readmatrix', 'file')
@@ -32,6 +31,7 @@ th = 4;
 faceth = 5;
 THRESHHOLDYUP = 41;
 %%%%%%%%%%%%%
+
 THRESHHOLDYUP3 = 100;
 faceflag = 0;
 faceflag3 = 0;
