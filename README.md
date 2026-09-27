@@ -254,6 +254,6 @@ void post(void)
 
 #### 其他信息
 
-什么地方没说明白，请告知！
+什么地方没说明白，请告知！citybusok#gmail.com
 
 #### 样机信息
