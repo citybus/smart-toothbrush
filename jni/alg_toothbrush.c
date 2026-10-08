@@ -610,7 +610,7 @@ void init(void)
 void post(void)
 {
   V1 = face;//delta_t * 1000;
-  V2 = newface;
+  V2 = newface;//不能动！！！
   V3 = yaw;
   V4 = lr * 100 + ps * 1; 
   V5 = pitch;
