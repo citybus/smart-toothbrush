@@ -37,9 +37,9 @@ static const short FaceRollBound[2][2][3] = {
 #define THRESHHOLDYUP     45
 #define ANCHOR8_HOLD_TIME 3.5
 #define MIDDLE_THRESHOLD  30
-#define FD_TIME           0.25
 #define ACCY_THRESHOLD    0.3
 #define YYAW_THRESHOLD     6
+#define FD_TIME           0.25
 #define JUSTSUM_TIME      1.0
 
 static inline void win16_update3_var(
@@ -308,7 +308,6 @@ void pre(void)
 
 void attitude_update(float gx, float gy, float gz, float ax, float ay, float az, float t) {
 
-	#ifdef SUPPORTY
 	yyaw += gy * 180.0f / 3.14159265f * t;
   yyaw = (yyaw > 179.999f) ? -179.999f : (yyaw < -179.999f) ? 179.999f : yyaw;
 		
@@ -360,14 +359,10 @@ if(ex != 0 && ey != 0 && ez != 0){
 	yaw = (float)(atan2(2 * q1 * q2 + 2 * q0 * q3, -2 * q2 * q2 - 2 * q3 * q3 + 1) * 180.0f / 3.14159265f);
   pitch = (float)(-asin(-2 * q1 * q3 + 2 * q0 * q2) * 180 / 3.14159265f);
   roll = (float)(+atan2(2 * q2 * q3 + 2 * q0 * q1, -2 * q1 * q1 - 2 * q2 * q2 + 1) * 180.0f / 3.14159265f);
-	#endif
-	#ifndef SUPPORTY 
-	pitch = (float)(atan(ax / fabs(az)) * 180.0f / 3.14159265f);//2 象限
-	roll = (float)(atan2(ay, az) * 180.0f / 3.14159265f);	
-	#endif
 	roll = roll - 45.0f;
 	if (roll <= -180.0f)
   roll = roll + 360.0f;		
+
 }
 
 void go(void) {
@@ -385,11 +380,11 @@ void go(void) {
 		{
 		if ((dy > YYAW_THRESHOLD))	 		 
     { 	
-			lr = 1;temp999 = 2;
+			lr = 1;temp999 = 1;
     }			
 	  if ((dy < -YYAW_THRESHOLD))	 		 
     { 		                                             
-			lr = 0;temp999 = 1;
+			lr = 0;temp999 = 2;
     }
 	}	
 			
@@ -397,84 +392,14 @@ void go(void) {
 	{
 		if ((dy > YYAW_THRESHOLD))		 
     { 	                                                 	
-			lr = 0;temp999 = 1;
+			lr = 0;temp999 = 3;
     }			
 	  if ((dy < -YYAW_THRESHOLD))	 		 
     { 		
-			lr = 1;temp999 = 2;
+			lr = 1;temp999 = 4;
     }
 	}	 
 	#endif
-
- #ifdef ANCHOR8
-   if (force[1] > anchor8keeppp)
-	 {
-		 anchor8keeppp = force[1];	 
-		 anchor8keepp = anchor8keeppp;
-	 }
-   if (force[1] < anchor8keepp)
-		 anchor8keepp = force[1];	 
-
-	 if (fabs(force[1] - forceymean) < TH)
-	   platformy = forceymean;	 
-	 if (fabs(force[1] - forceypmean) < TH)
-	   platformyp = forceypmean;	 
- 
- if (((platformystore == platformy) || (platformypstore == platformyp)) && (((force[1] - platformy) >  FACETH) || ((force[1] - platformyp) >  FACETH)) && (faceflag == 0))
- { 
- faceflag = 1;
- }
-
- if (faceflag == 1)
-	 faceflag3 = 1;
-
- if ((platformystore != platformy) && (platformypstore != platformyp))  
- {
- faceflag = 0;
- }
- 
- platformystore = platformy;
- platformypstore = platformyp; 
- 
-	 if (((anchor8keeppp - platformy) > THRESHHOLDYUP))	 
-	 {anchory8flag1 = 1;
-	 }
-	 if (anchory8flag1 == 1)
-	 {anchory8sum1 = anchory8sum1 + delta_t;
-	 }
-	 if (anchory8sum1 > ANCHOR8_HOLD_TIME)
-	 {
-    anchory8flag1 = 0;
-	  anchory8sum1 = 0.0f;			
-		{
-		if (acc[1] > 0.0f)				
-    {
-    valid = 1;
-		}
-		if (acc[1] < -0.0f)			
-    {
-    valid = 2;
-		}		
-	  }			
-		
-		if (faceflag3 == 1)
-		{
-			if (acc[1] > 0.0f)			
-    {
-    valid = 2;
-		}
-		if (acc[1] < -0.0f)			
-    {
-    valid = 1;
-		}		
-	  }
-		anchor8keepp = 100;//low 2nd reset
-		anchor8keeppp = -100;//high 2nd reset
-		faceflag3 = 0;
-	 }
-	 valid_setface_debounce(valid);
- #endif
-
 	 
 			/* Face zone selection by roll angle.
 			 *
@@ -546,11 +471,80 @@ void go(void) {
 
 	 if (oldface != face)
 		 fd_flag = 1;
-	 face_debounce(delta_t, face, FD_TIME, &fd_flag, &fd_sum, &newface);	 
+	 face_debounce(delta_t, face, FD_TIME, &fd_flag, &fd_sum, &newface);
+
+ #ifdef ANCHOR8
+   if (force[1] > anchor8keeppp)
+	 {
+		 anchor8keeppp = force[1];	 
+		 anchor8keepp = anchor8keeppp;
+	 }
+   if (force[1] < anchor8keepp)
+		 anchor8keepp = force[1];	 
+
+	 if (fabs(force[1] - forceymean) < TH)
+	   platformy = forceymean;	 
+	 if (fabs(force[1] - forceypmean) < TH)
+	   platformyp = forceypmean;	 
+ 
+ if (((platformystore == platformy) || (platformypstore == platformyp)) && (((force[1] - platformy) >  FACETH) || ((force[1] - platformyp) >  FACETH)) && (faceflag == 0))
+ { 
+ faceflag = 1;
+ }
+
+ if (faceflag == 1)
+	 faceflag3 = 1;
+
+ if ((platformystore != platformy) && (platformypstore != platformyp))  
+ {
+ faceflag = 0;
+ }
+ 
+ platformystore = platformy;
+ platformypstore = platformyp; 
+ 
+	 if (((anchor8keeppp - platformy) > THRESHHOLDYUP))	 
+	 {anchory8flag1 = 1;
+	 }
+	 if (anchory8flag1 == 1)
+	 {anchory8sum1 = anchory8sum1 + delta_t;
+	 }
+	 if (anchory8sum1 > ANCHOR8_HOLD_TIME)
+	 {
+    anchory8flag1 = 0;
+	  anchory8sum1 = 0.0f;			
+		{
+		if (acc[1] > 0.0f)				
+    {
+    valid = 1;
+		}
+		if (acc[1] < -0.0f)			
+    {
+    valid = 2;
+		}		
+	  }			
+		
+		if (faceflag3 == 1)
+		{
+			if (acc[1] > 0.0f)			
+    {
+    valid = 2;
+		}
+		if (acc[1] < -0.0f)			
+    {
+    valid = 1;
+		}		
+	  }
+		anchor8keepp = 100;//low 2nd reset
+		anchor8keeppp = -100;//high 2nd reset
+		faceflag3 = 0;
+	 }
+ #endif 		
 	 }  /* end if (ps == 3) */
+	 valid_setface_debounce(valid);
 	 justsum = justsum + delta_t;
 	 if (justsum > JUSTSUM_TIME)
-	 {
+	 {lastyyaw = 0.0f;
 	  lastyyaw = yyaw;
     justsum = 0.0f;		 
 	 }
@@ -592,7 +586,7 @@ float get_dt(void)
 				
 void setface(short face)
 {
-	lr = face - 1;temp999 = temp999 + 10 * (lr == 0 ? 1 : 2);
+	lr = face - 1;
 	return;
 }
 
@@ -617,16 +611,17 @@ void post(void)
 {
   V1 = face;//delta_t * 1000;
   V2 = newface;//不能动！！！
+  V2 = newface;
   V3 = yaw;
   V4 = lr * 100 + ps * 1; 
   V5 = pitch;
   V6 = roll;
   V7 = yyaw;
-  V8 = lastyyaw;
+  V8 = valid;
   V9 = anchory8flag1;
   V10 = faceflag3;
   V11 = middle_flag;
-  V12 = acc[1] * 10;
+  V12 = 0;
   V13 = 0;
   V14 = 0;
   V15 = 0;
@@ -644,6 +639,7 @@ short alg_toothbrush_update(float *accVal, float *gyroVal, short pressState, flo
 	delta_t = get_dt();
 	attitude_update(gyro[0] * 3.14159265f / 180.0f, gyro[1] * 3.14159265f / 180.0f, gyro[2] * 3.14159265f / 180.0f, acc[0], acc[1], acc[2], delta_t);
 	go();
+	//para[7] = valid;
 	post();	
   return newface;
 }
