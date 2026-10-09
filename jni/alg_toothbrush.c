@@ -308,6 +308,7 @@ void pre(void)
 
 void attitude_update(float gx, float gy, float gz, float ax, float ay, float az, float t) {
 
+	#ifdef SUPPORTY
 	yyaw += gy * 180.0f / 3.14159265f * t;
   yyaw = (yyaw > 179.999f) ? -179.999f : (yyaw < -179.999f) ? 179.999f : yyaw;
 		
@@ -359,10 +360,14 @@ if(ex != 0 && ey != 0 && ez != 0){
 	yaw = (float)(atan2(2 * q1 * q2 + 2 * q0 * q3, -2 * q2 * q2 - 2 * q3 * q3 + 1) * 180.0f / 3.14159265f);
   pitch = (float)(-asin(-2 * q1 * q3 + 2 * q0 * q2) * 180 / 3.14159265f);
   roll = (float)(+atan2(2 * q2 * q3 + 2 * q0 * q1, -2 * q1 * q1 - 2 * q2 * q2 + 1) * 180.0f / 3.14159265f);
+	#endif
+	#ifndef SUPPORTY 
+	pitch = (float)(atan(ax / fabs(az)) * 180.0f / 3.14159265f);//2 象限
+	roll = (float)(atan2(ay, az) * 180.0f / 3.14159265f);	
+	#endif
 	roll = roll - 45.0f;
 	if (roll <= -180.0f)
   roll = roll + 360.0f;		
-
 }
 
 void go(void) {
@@ -544,7 +549,7 @@ void go(void) {
 	 valid_setface_debounce(valid);
 	 justsum = justsum + delta_t;
 	 if (justsum > JUSTSUM_TIME)
-	 {lastyyaw = 0.0f;
+	 {
 	  lastyyaw = yyaw;
     justsum = 0.0f;		 
 	 }
@@ -610,7 +615,7 @@ void init(void)
 void post(void)
 {
   V1 = face;//delta_t * 1000;
-  V2 = newface;//不能动！！！
+  V2 = newface;
   V3 = yaw;
   V4 = lr * 100 + ps * 1; 
   V5 = pitch;
@@ -638,7 +643,6 @@ short alg_toothbrush_update(float *accVal, float *gyroVal, short pressState, flo
 	delta_t = get_dt();
 	attitude_update(gyro[0] * 3.14159265f / 180.0f, gyro[1] * 3.14159265f / 180.0f, gyro[2] * 3.14159265f / 180.0f, acc[0], acc[1], acc[2], delta_t);
 	go();
-	//para[7] = valid;
 	post();	
   return newface;
 }
