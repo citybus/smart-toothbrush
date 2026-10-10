@@ -4,9 +4,11 @@ Smart Toothbrush - Report Generator (18-Pos mode)
 
 import os
 import re
+import argparse
 
 COLUMN_INDEX = 15
 INPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output')
+SUBDIR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'input')
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'report')
 
 TEMPLATE = [
@@ -36,6 +38,34 @@ def wrap_line(prefix, items, sep=','):
     if not lines:
         lines.append(prefix)
     return '\n'.join(lines)
+
+
+CELL_RE = re.compile(r'\((?:\()?(\d+)x?,(\d+)(?:,\d+)?\)(?:\))?<')
+
+
+def validate_ln_increasing(lines):
+    """校验报告：每个 File 块内所有 (val,ln) 单元格的 ln 必须全局严格递增。
+    返回违规描述列表；为空表示通过。"""
+    violations = []
+    seq = []  # (ln, line_no, cell_text)
+    seq_start = 0
+
+    def flush():
+        for a, b in zip(seq, seq[1:]):
+            if b[0] <= a[0]:
+                violations.append(
+                    f"block starting line {seq_start}: ln {a[0]} (line {a[1]}: {a[2]}) "
+                    f"-> ln {b[0]} (line {b[1]}: {b[2]}) not increasing")
+
+    for idx, line in enumerate(lines, 1):
+        if line.startswith('File:'):
+            flush()
+            seq = []
+            seq_start = idx
+        for m in CELL_RE.finditer(line):
+            seq.append((int(m.group(2)), idx, m.group(0)))
+    flush()
+    return violations
 
 
 def count_any_col(filepath, target_col=22, trigger_col=3, trigger_val=1):
@@ -278,53 +308,41 @@ def match_template(deduped_with_count, deduped_line_numbers):
 
 
 def _match_template_fallback(vals, cnts, lns, nv, nt, selected_orig, start):
-    """降级逻辑：当非1值不足18个时使用"""
-    dp = [[0] * (nv + 1) for _ in range(nt + 1)]
-    
+    """降级逻辑：当非1值不足18个时使用。
+    所有值按原始顺序（ln 严格递增）依次填入位置，位置不够留空(--)，
+    保证块内 ln 全局严格递增。"""
+    NEG_INF = -10000
+    dp = [[NEG_INF] * (nv + 1) for _ in range(nt + 1)]
+    for i in range(nt + 1):
+        dp[i][0] = 0  # 无值可填时所有位置留空
+
     for i in range(1, nt + 1):
-        ts = TEMPLATE[i-1]
-        for j in range(1, nv + 1):
-            dp[i][j] = dp[i][j-1]
-            if vals[j-1] in ts:
-                if dp[i-1][j-1] + 1 > dp[i][j]:
-                    dp[i][j] = dp[i-1][j-1] + 1
-            if dp[i-1][j] > dp[i][j]:
-                dp[i][j] = dp[i-1][j]
-    
-    matched_pos = {}
-    used_vals = set()
+        ts = TEMPLATE[i - 1]
+        for j in range(1, min(i, nv) + 1):
+            # 位置 i 留空，值 j 归前面的位置
+            best = dp[i - 1][j]
+            # 位置 i 取值 j（值必须按序填，j 单调递增 → ln 递增）
+            add = 1 if vals[j - 1] in ts else 0
+            if dp[i - 1][j - 1] + add > best:
+                best = dp[i - 1][j - 1] + add
+            dp[i][j] = best
+
+    result = [(None, 0, False, None)] * nt
+    match_count = 0
     i, j = nt, nv
     while i > 0 and j > 0:
-        if dp[i][j] == dp[i-1][j]:
-            i -= 1
-        elif dp[i][j] == dp[i][j-1]:
-            j -= 1
-        elif vals[j-1] in TEMPLATE[i-1] and dp[i][j] == dp[i-1][j-1] + 1:
-            matched_pos[i-1] = (vals[j-1], cnts[j-1], lns[j-1])
-            used_vals.add(j-1)
+        add = 1 if vals[j - 1] in TEMPLATE[i - 1] else 0
+        if dp[i][j] == dp[i - 1][j - 1] + add:
+            result[i - 1] = (vals[j - 1], cnts[j - 1], bool(add), lns[j - 1])
+            if add:
+                match_count += 1
             i -= 1
             j -= 1
+        elif dp[i][j] == dp[i - 1][j]:
+            i -= 1  # 位置 i 留空
         else:
             i -= 1
-    
-    unused_vals = [(vals[k], cnts[k], lns[k]) for k in range(nv) if k not in used_vals]
-    unused_idx = 0
-    
-    result = []
-    match_count = 0
-    for pos_idx in range(nt):
-        if pos_idx in matched_pos:
-            val, cnt, ln = matched_pos[pos_idx]
-            result.append((val, cnt, True, ln))
-            match_count += 1
-        else:
-            if unused_idx < len(unused_vals):
-                val, cnt, ln = unused_vals[unused_idx]
-                result.append((val, cnt, False, ln))
-                unused_idx += 1
-            else:
-                result.append((None, 0, False, None))
-    
+
     for k in range(1, nt):
         val_k, cnt_k, is_match_k, ln_k = result[k]
         if val_k is None:
@@ -338,14 +356,22 @@ def _match_template_fallback(vals, cnts, lns, nv, nt, selected_orig, start):
     return result, match_count, selected_orig, start
 
 
-def generate_report():
+def generate_report(subdir_filter=None):
     if not os.path.exists(INPUT_DIR):
         print(f"[ERROR] Input directory not found: {INPUT_DIR}")
         return
+    if not os.path.exists(SUBDIR_DIR):
+        print(f"[ERROR] Input directory not found: {SUBDIR_DIR}")
+        return
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    subdirs = [d for d in os.listdir(INPUT_DIR) if os.path.isdir(os.path.join(INPUT_DIR, d))]
-    if not subdirs:
+    subdirs = [d for d in os.listdir(SUBDIR_DIR) if os.path.isdir(os.path.join(SUBDIR_DIR, d))]
+    if subdir_filter:
+        if subdir_filter not in subdirs:
+            print(f"[ERROR] input 下没有子目录: {subdir_filter}")
+            return
+        subdirs = [subdir_filter]
+    elif not subdirs:
         subdirs = ['']
 
     for subdir in subdirs:
@@ -408,6 +434,7 @@ def generate_report():
 
         # 构建新报告内容（行列表）
         new_lines = []
+        file_blocks = {}  # filename -> 该文件的 File 块内容（用于备份文件）
         new_lines.append("=" * 70)
         new_lines.append(f"Report for subdirectory: {subdir}")
         new_lines.append("=" * 70)
@@ -469,6 +496,7 @@ def generate_report():
             new_lines.append("")
 
         for filename, raw_values, deduped, matched, match_count, selected_orig, _, deduped_line_numbers in file_results:
+            blk_start = len(new_lines)
             new_lines.append(f"File: {filename}")
             new_lines.append(f"  Raw rows: {len(raw_values)}")
             new_lines.append(f"  Match: {match_count}/18")
@@ -481,12 +509,13 @@ def generate_report():
 
             # 输出规则：两个 Pos 之间夹的未分配值——
             #   第2遍扫描已分配的数（直接命中前后模板）不再参与 +/−：
-            #     属于前一个 Pos 模板 -> 并入上一个 Pos 行（无符号，空格分隔）
+            #     属于前一个 Pos 模板 -> 补分值（无符号），能并入主行则并入（不破坏 ln 递增）
             #     属于后一个 Pos 模板 -> '-' 前缀单列
             #   其余未分配值按成对关系标注：
             #     与前一个 Pos 模板成对（其 FACE_PAIR 在前一模板中） -> '+' 前缀单列
             #     与后一个 Pos 模板成对（其 FACE_PAIR 在后一模板中） -> '-' 前缀单列
             #     与前后模板均不成对                              -> 不带符号单列
+            #   所有单列项按 ln 升序输出，保证块内行号全局严格递增
             pos_main = {p: "--" for p in range(1, len(TEMPLATE) + 1)}
             for i, (value, count, is_match, ln) in enumerate(matched, 1):
                 if ln is not None:
@@ -512,21 +541,20 @@ def generate_report():
                 items = []
                 for val, cnt, oi in pending:
                     if tpl_prev is not None and val in tpl_prev:
-                        pos_extra.setdefault(prev_pos_num, []).append(f"({val},{oi})<{cnt}>")
+                        pos_extra.setdefault(prev_pos_num, []).append((oi, f"(({val},{oi}))<{cnt}>"))
                     elif tpl_next is not None and val in tpl_next:
-                        items.append(f"-({val},{oi})<{cnt}>")
+                        items.append((oi, f"-({val},{oi})<{cnt}>"))
                     else:
                         partner = FACE_PAIR.get(val)
                         if partner is not None and tpl_prev is not None and partner in tpl_prev:
-                            items.append(f"+({val},{oi})<{cnt}>")
+                            items.append((oi, f"+({val},{oi})<{cnt}>"))
                         elif partner is not None and tpl_next is not None and partner in tpl_next:
-                            items.append(f"-({val},{oi})<{cnt}>")
+                            items.append((oi, f"-({val},{oi})<{cnt}>"))
                         else:
-                            items.append(f"({val},{oi})<{cnt}>")
+                            items.append((oi, f"({val},{oi})<{cnt}>"))
                 if items:
                     key = prev_pos_num if prev_pos_num is not None else 0
-                    for wl in wrap_line('           ', items).split('\n'):
-                        standalone.setdefault(key, []).append(wl)
+                    standalone.setdefault(key, []).extend(items)
                 pending = []
 
             for i, (val, cnt) in enumerate(deduped):
@@ -541,13 +569,16 @@ def generate_report():
                     pending.append((val, cnt, ln))
             classify_flush(None)
 
-            # 依 Pos 顺序输出：主行（主值 + 并入的补分值 + 模板），其后是该 Pos 的单列行
-            for wl in standalone.get(0, []):
-                new_lines.append(wl)
+            # 依 Pos 顺序输出：主行（主值 + 模板），其后是该 Pos 的单列项
+            # （补分值与 +/- 单列项合并后按 ln 升序），保证块内 ln 全局严格递增
+            pre = sorted(standalone.get(0, []), key=lambda x: x[0])
+            if pre:
+                for wl in wrap_line('           ', [t for _, t in pre]).split('\n'):
+                    new_lines.append(wl)
             for p in range(1, len(TEMPLATE) + 1):
                 prefix = f'  Pos {p:2d}: '
                 tpl = '{' + ', '.join(str(v) for v in TEMPLATE[p - 1]) + '}'
-                items = [pos_main[p]] + pos_extra.get(p, []) + [tpl]
+                items = [pos_main[p], tpl]
                 line = prefix + ''.join(items)
                 if len(line) <= MAX_LINE_LEN:
                     new_lines.append(line)
@@ -561,10 +592,13 @@ def generate_report():
                         else:
                             cur = cand
                     new_lines.append(cur)
-                for wl in standalone.get(p, []):
-                    new_lines.append(wl)
+                pool = sorted(pos_extra.get(p, []) + standalone.get(p, []), key=lambda x: x[0])
+                if pool:
+                    for wl in wrap_line('           ', [t for _, t in pool]).split('\n'):
+                        new_lines.append(wl)
             # 18个Pos的count总和（主值 + 并入Pos行的补分值，含带x主值行），与明细 Pos 行展示一致
-            new_lines.append(f"  18 Positions Total count: {file_stats[filename][1]} ({file_stats[filename][2]})")
+            new_lines.append(f"  18 Positions Total count: {file_stats[filename][2]}")
+            file_blocks[filename] = new_lines[blk_start:]
 
 
 
@@ -581,6 +615,14 @@ def generate_report():
                 else:
                     old_lines.append(line)
 
+        # 嵌入验证：新生成的报告内容必须满足块内 ln 全局严格递增，不通过则不写文件
+        violations = validate_ln_increasing(new_lines)
+        if violations:
+            print(f"[VALIDATE FAIL] {report_path}: {len(violations)} violation(s)")
+            for v in violations:
+                print(f"  {v}")
+            raise SystemExit(1)
+
         # 写入报告
         with open(report_path, 'w') as report:
             if old_lines:
@@ -596,9 +638,107 @@ def generate_report():
                 # 首次生成
                 for line in new_lines:
                     report.write(line + '\n')
+        print(f"[VALIDATE OK] {report_path} ({len(new_lines)} lines)")
+
+        # 每个输入文件的块内容追加到自己的备份文件（写入逻辑与 generate_report2.py 一致）
+        for filename, _, _, _, match_count, _, mark_groups, _ in file_results:
+            if filename not in file_blocks:
+                continue
+            backup_path = os.path.join(report_subdir, filename)
+
+            # 构建新内容：分隔符 + 该文件的 def 参数 + 准确率 + File 块
+            blk_lines = ["=" * 50]
+            base = filename.replace('.txt', '.')
+            def_path = None
+            for df in os.listdir(input_subdir):
+                if df.startswith(base) and df.endswith('.def'):
+                    def_path = os.path.join(input_subdir, df)
+                    break
+            if def_path and os.path.exists(def_path):
+                with open(def_path, 'r', encoding='utf-8') as df:
+                    for line in df:
+                        line = line.strip()
+                        if line:
+                            blk_lines.append(f"  {line}")
+            raw_cnt, total18, time18, signed_cnt = file_stats[filename]
+            pct_face = match_count / 18 * 100
+            pct_time = (time18 / raw_cnt * 100) if raw_cnt else 0.0
+            blk_lines.append(f"R2: {mark_groups}")
+            blk_lines.append(f"Face Accuracy: {match_count}/18 ({pct_face:.2f}%)")
+            blk_lines.append(f"Time Accuracy: {pct_time:.2f}%")
+            blk_lines.extend(file_blocks[filename])
+
+            # 判断写入左侧还是右侧
+            try:
+                old_lines = []
+                if os.path.exists(backup_path):
+                    with open(backup_path, 'r', encoding='utf-8') as f:
+                        old_lines = [line.rstrip('\n') for line in f.readlines()]
+
+                last_non_space = ''
+                for line in reversed(old_lines):
+                    if line and line[0] != ' ':
+                        last_non_space = line
+                        break
+                is_right_mode = last_non_space.startswith('=')
+
+                if is_right_mode:
+                    old_left = []
+                    old_right = []
+                    for line in old_lines:
+                        sep_pos = line.rfind('|')
+                        if sep_pos >= 0:
+                            old_left.append(line[:sep_pos].rstrip())
+                            old_right.append(line[sep_pos+1:])
+                        else:
+                            old_left.append(line)
+                            old_right.append('')
+
+                    insert_pos = 0
+                    for i in range(len(old_right)):
+                        if not old_right[i].strip():
+                            insert_pos = i
+                            break
+                    else:
+                        insert_pos = len(old_right)
+
+                    for i, nl in enumerate(blk_lines):
+                        pos = insert_pos + i
+                        if pos < len(old_right):
+                            old_right[pos] = nl
+                        else:
+                            old_right.append(nl)
+
+                    max_len = max(len(old_left), len(old_right))
+                    while len(old_left) < max_len:
+                        old_left.append('')
+                    while len(old_right) < max_len:
+                        old_right.append('')
+
+                    with open(backup_path, 'w', encoding='utf-8') as f:
+                        max_left_len = max((len(line) for line in old_left), default=20)
+                        col_width = max(max_left_len, 20) + 4
+                        for i in range(max_len):
+                            left_part = old_left[i]
+                            right_part = old_right[i] if i < len(old_right) else ""
+                            if i == len(old_left) - 1 and left_part.strip() == '=' * 50:
+                                f.write(left_part + "\n")
+                            else:
+                                f.write(f"{left_part:<{col_width}}|{right_part}\n")
+                else:
+                    # 左侧模式：直接追加新内容到文件末尾
+                    with open(backup_path, 'a', encoding='utf-8') as f:
+                        for line in blk_lines:
+                            f.write(line + '\n')
+            except Exception as e:
+                print(f"[Report] Backup写入失败 {backup_path}: {e}")
+            print(f"[Report] Backup: {backup_path}")
 
 
 if __name__ == '__main__':
     print("=== Smart Toothbrush Report Generator (18-Pos) ===")
-    generate_report()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--subdir", help="只生成该子目录的报告（默认全部）")
+    a = ap.parse_args()
+    generate_report(a.subdir)
     print("=== Done ===")

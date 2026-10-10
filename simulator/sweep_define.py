@@ -28,6 +28,11 @@ import subprocess
 import sys
 import time
 
+
+def _natkey(s):
+    """自然排序key：数字片段按数值比，禁止裸 sorted() 字符串序"""
+    return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', s)]
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SRC = os.path.join(ROOT, "jni", "alg_toothbrush.c")
@@ -38,6 +43,7 @@ SIM_BUILD_ALL = os.path.join(HERE, "build_all.bat")
 SIM_RUN_ALL = os.path.join(HERE, "run_all.bat")
 REPORT_PY = os.path.join(HERE, "generate_report.py")
 REPORT2_PY = os.path.join(HERE, "generate_report2.py")
+BUILD_BAT = os.path.join(HERE, "build.bat")
 
 TARGET = "time"  # 可选: "face" | "time"
 SECONDARY = "time" if TARGET == "face" else "face"  # 第二目标
@@ -47,6 +53,37 @@ ACC_RE_FACE = re.compile(
 ACC_RE_TIME = re.compile(
     r">>>\s*Overall Accuracy Based On Time:\s*([0-9.]+)%\s*\((\d+)\s*/\s*(\d+)\)")
 ACC_RE = ACC_RE_TIME if str(TARGET).strip().lower() == "time" else ACC_RE_FACE
+
+# setpara 免编译扫描: 与 alg_toothbrush.c setpara 签名同序的 9 个宏
+SETPARA_MACROS = ["TH", "FACETH", "THRESHHOLDYUP", "ANCHOR8_HOLD_TIME",
+                  "MIDDLE_THRESHOLD", "FD_TIME", "ACCY_THRESHOLD",
+                  "YYAW_THRESHOLD", "JUSTSUM_TIME"]
+
+
+def setpara_env_full(src_text, def_params, define, token):
+    """9 字段全值: 扫描宏=token, def 有则覆盖, 其余取源码 #define"""
+    parts = []
+    for k in SETPARA_MACROS:
+        if k == define:
+            parts.append(str(token))
+        elif k in def_params:
+            parts.append(str(def_params[k]))
+        else:
+            parts.append(str(get_define_value(src_text, k)))
+    return ",".join(parts)
+
+
+def setpara_env_only(define, token):
+    """9 字段: 扫描宏=token, 其余 '-' = 继承各文件编译时值"""
+    return ",".join(str(token) if k == define else "-" for k in SETPARA_MACROS)
+
+
+def setpara_apply(value):
+    os.environ["SETPARA"] = value
+
+
+def setpara_clear():
+    os.environ.pop("SETPARA", None)
 
 
 def run_step(cmd, cwd=None):
@@ -218,6 +255,10 @@ def sweep_per_file(args, vals):
     with open(src_path, "r", encoding="utf-8") as f:
         src_text = f.read()
 
+    if args.define not in SETPARA_MACROS:
+        print(f"[sweep][ERROR] 宏 {args.define} 不在 setpara 支持列表 {SETPARA_MACROS}，无法免编译扫描")
+        return 1
+
     sweep_def = os.path.join(HERE, "sweep_define.def")
     all_macros = []
     if os.path.exists(sweep_def):
@@ -238,30 +279,29 @@ def sweep_per_file(args, vals):
 
     per_file_best = {}
     results = []
+    exe_checked = False
 
     for idx, val in enumerate(vals, 1):
         token = fmt(val, args.is_float)
         t0 = time.time()
 
         update_def_files(def_dir, input_dir, args.define, token)
-
-        ok, out = run_step(f'"{JNI_BUILD_ALL}"')
-        if not ok:
-            print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  DLL 编译失败，跳过")
-            results.append((token, None, time.time() - t0))
-            continue
-
-        ok, out = run_step(f'"{SIM_BUILD_ALL}"')
-        if not ok:
-            print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  EXE 编译失败，跳过")
-            results.append((token, None, time.time() - t0))
-            continue
+        setpara_apply(setpara_env_only(args.define, token))
 
         ok, out = run_step(f'"{SIM_RUN_ALL}"')
         if not ok:
             print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  仿真运行失败，跳过")
+            for l in (out or "").strip().splitlines()[-3:]:
+                print("    " + l)
             results.append((token, None, time.time() - t0))
             continue
+        if not exe_checked:
+            exe_checked = True
+            if "[setpara]" not in out:
+                setpara_clear()
+                print("[sweep][ERROR] EXE 没认出 setpara（旧版 simulator.exe？先编译一次 EXE/DLL："
+                      "跑 run_sweep_all.py 或手动运行 build.bat）")
+                return 1
 
         for _attempt in range(6):
             try:
@@ -276,7 +316,7 @@ def sweep_per_file(args, vals):
         if args.stage2: stage_args += " --stage2"
         if args.stage3: stage_args += " --stage3"
         report_script = REPORT2_PY if stage_args else REPORT_PY
-        ok, out = run_step(f'"{sys.executable}" "{report_script}"{stage_args}', cwd=HERE)
+        ok, out = run_step(f'"{sys.executable}" "{report_script}"{stage_args} --subdir "{args.subdir}"', cwd=HERE)
         if not ok:
             print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  报告生成失败，跳过")
             results.append((token, None, time.time() - t0))
@@ -306,7 +346,7 @@ def sweep_per_file(args, vals):
                 elif abs(facc2 - per_file_best[fname][1]) < 1e-9:
                     per_file_best[fname][2].append(token)
 
-        sorted_files = sorted(per_file_acc.keys())
+        sorted_files = sorted(per_file_acc.keys(), key=_natkey)
         for i, fname in enumerate(sorted_files):
             best_acc_f, best_acc2_f, best_tok_f = per_file_best[fname]
             cur_acc = per_file_acc[fname]
@@ -316,6 +356,8 @@ def sweep_per_file(args, vals):
                 print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  {elapsed:.1f}s  {fname}: {TARGET}={cur_acc:.1f}% {SECONDARY}={cur_acc2:.1f}% (best={best_acc_f:.1f}%){is_best}")
             else:
                 print(f"         {fname}: {TARGET}={cur_acc:.1f}% {SECONDARY}={cur_acc2:.1f}% (best={best_acc_f:.1f}%){is_best}")
+
+    setpara_clear()
 
     csv_path = os.path.join(HERE, f"sweep_{args.define}_results.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
@@ -327,12 +369,12 @@ def sweep_per_file(args, vals):
 
     print("=" * 72)
     print(f"[sweep] Per-file 最优 {args.define}:")
-    for fname in sorted(per_file_best.keys()):
+    for fname in sorted(per_file_best.keys(), key=_natkey):
         best_acc_f, best_acc2_f, best_tok_f = per_file_best[fname]
         best_str_f = compress_values(best_tok_f)
         print(f"  {fname}: {args.define}={best_str_f}  {TARGET}={best_acc_f:.2f}%  {SECONDARY}={best_acc2_f:.2f}%")
 
-    for fname in sorted(per_file_best.keys()):
+    for fname in sorted(per_file_best.keys(), key=_natkey):
         best_acc_f, best_acc2_f, best_tok_f = per_file_best[fname]
         best_str_f = compress_values(best_tok_f)
         def_path = os.path.join(def_dir, fname.replace(".txt", f".{TARGET}.def"))
@@ -356,6 +398,9 @@ def sweep_per_file(args, vals):
 
 def sweep_overall(args, vals):
     """整体模式：找 overall 最优值"""
+    if args.define not in SETPARA_MACROS:
+        print(f"[sweep][ERROR] 宏 {args.define} 不在 setpara 支持列表 {SETPARA_MACROS}，无法免编译扫描")
+        return 1
     with open(SRC, "r", encoding="utf-8") as f:
         orig_text = f.read()
     true_orig = orig_text
@@ -405,14 +450,8 @@ def sweep_overall(args, vals):
     if def_token is not None:
         start_token = def_token
         print(f"[sweep] 宏 {args.define} def值 = {def_token} (以def文件作为起点)")
-        new_text = orig_text
         for k, v in all_def_params.items():
-            new_text, n = set_define_value(new_text, k, v)
-            if n > 0:
-                print(f"[sweep] 已加载 {k} = {v}")
-        with open(SRC, "w", encoding="utf-8") as f:
-            f.write(new_text)
-        orig_text = new_text
+            print(f"[sweep] 已加载 {k} = {v}")
     else:
         print(f"[sweep] 宏 {args.define} 无def文件 (以代码初始值作为起点)")
 
@@ -429,26 +468,32 @@ def sweep_overall(args, vals):
     report_dir = os.path.join(ROOT, "report", args.subdir)
     report_file = os.path.join(report_dir, f"report_{args.subdir}.txt")
 
+    exe_checked = False
+    exe_stale = False
+
     # 用 def_token 值生成起点报告
     if def_token is not None:
-        with open(SRC, "w", encoding="utf-8") as f:
-            f.write(orig_text)
-        ok, out = run_step(f'"{JNI_BUILD}"')
-        if ok and "successful" in out:
-            ok, out = run_step(f'"{RUN_BAT}"')
-            if ok and "Done" in out:
-                for _attempt in range(6):
-                    try:
-                        if os.path.exists(report_file):
-                            os.remove(report_file)
-                        break
-                    except PermissionError:
-                        time.sleep(0.5)
-                ok, out = run_step(f'"{sys.executable}" "{report_script}"{stage_args}', cwd=HERE)
-                r = read_accuracy(report_file)
-                if r:
-                    base_acc, base_m, base_n = r
-                    print(f"[sweep] 起点值 {def_token} Accuracy = {base_acc:.2f}% ({base_m}/{base_n})")
+        setpara_apply(setpara_env_full(orig_text, all_def_params, args.define, start_token))
+        ok, out = run_step(f'"{RUN_BAT}"')
+        if ok and "Done" in out:
+            exe_checked = True
+            if "[setpara]" not in out:
+                setpara_clear()
+                print("[sweep][ERROR] EXE 没认出 setpara（旧版 simulator.exe？先编译一次 EXE/DLL："
+                      "跑 run_sweep_all.py 或手动运行 build.bat）")
+                return 1
+            for _attempt in range(6):
+                try:
+                    if os.path.exists(report_file):
+                        os.remove(report_file)
+                    break
+                except PermissionError:
+                    time.sleep(0.5)
+            ok, out = run_step(f'"{sys.executable}" "{report_script}"{stage_args} --subdir "{args.subdir}"', cwd=HERE)
+            r = read_accuracy(report_file)
+            if r:
+                base_acc, base_m, base_n = r
+                print(f"[sweep] 起点值 {def_token} Accuracy = {base_acc:.2f}% ({base_m}/{base_n})")
 
     results = []
     try:
@@ -456,23 +501,22 @@ def sweep_overall(args, vals):
             token = fmt(val, args.is_float)
             t0 = time.time()
 
-            with open(SRC, "w", encoding="utf-8") as f:
-                f.write(orig_text)
-            new_text, _ = set_define_value(orig_text, args.define, token)
-            with open(SRC, "w", encoding="utf-8") as f:
-                f.write(new_text)
-
-            ok, out = run_step(f'"{JNI_BUILD}"')
-            if not ok or "successful" not in out:
-                print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  DLL 编译失败，跳过")
-                results.append((token, None, None, None, time.time() - t0))
-                continue
+            setpara_apply(setpara_env_full(orig_text, all_def_params, args.define, token))
+            update_def_files(output_dir, input_dir, args.define, token)
 
             ok, out = run_step(f'"{RUN_BAT}"')
             if not ok or "Done" not in out:
                 print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  simulator 运行失败，跳过")
+                for l in (out or "").strip().splitlines()[-3:]:
+                    print("    " + l)
                 results.append((token, None, None, None, time.time() - t0))
                 continue
+
+            if not exe_checked:
+                exe_checked = True
+                if "[setpara]" not in out:
+                    exe_stale = True
+                    break
 
             for _attempt in range(6):
                 try:
@@ -482,7 +526,7 @@ def sweep_overall(args, vals):
                 except PermissionError:
                     time.sleep(0.5)
 
-            ok, out = run_step(f'"{sys.executable}" "{report_script}"{stage_args}', cwd=HERE)
+            ok, out = run_step(f'"{sys.executable}" "{report_script}"{stage_args} --subdir "{args.subdir}"', cwd=HERE)
             if not ok:
                 print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  报告生成失败，跳过")
                 results.append((token, None, None, None, time.time() - t0))
@@ -508,14 +552,12 @@ def sweep_overall(args, vals):
                 mark = "   <- 起点值"
             print(f"[{idx:2d}/{len(vals)}] {args.define}={token:>6}  Accuracy={acc:6.2f}% ({mm}/{nn})  {elapsed:4.1f}s{mark}")
     finally:
-        with open(SRC, "w", encoding="utf-8") as f:
-            f.write(true_orig)
-        ok, out = run_step(f'"{JNI_BUILD}"')
-        if ok and "successful" in out:
-            print("-" * 72)
-            print("[sweep] 源码已恢复并按原始值重编译 DLL")
-        else:
-            print("[sweep][WARN] 恢复后重编译失败，请手动运行 jni\\build.bat")
+        setpara_clear()
+
+    if exe_stale:
+        print("[sweep][ERROR] EXE 没认出 setpara（旧版 simulator.exe？先编译一次 EXE/DLL："
+              "跑 run_sweep_all.py 或手动运行 build.bat）")
+        return 1
 
     valid = [r for r in results if r[1] is not None]
     if not valid:
@@ -575,6 +617,40 @@ def sweep_overall(args, vals):
     return 0
 
 
+def final_run(args):
+    """--final: 用当前 def（各宏扫描出的最优值）最后跑一遍仿真并重新生成报告"""
+    report_dir = os.path.join(ROOT, "report", args.subdir)
+    report_file = os.path.join(report_dir, f"report_{args.subdir}.txt")
+
+    setpara_clear()
+    run_bat = SIM_RUN_ALL if args.per_file else RUN_BAT
+    ok, out = run_step(f'"{run_bat}"')
+    if not ok:
+        print("[final][ERROR] 最终仿真运行失败，末尾输出:")
+        for l in (out or "").strip().splitlines()[-5:]:
+            print("    " + l)
+        return 1
+
+    for _attempt in range(6):
+        try:
+            if os.path.exists(report_file):
+                os.remove(report_file)
+            break
+        except PermissionError:
+            time.sleep(0.5)
+
+    # 最终报告固定用 generate_report.py 出完整报告（不带 stage 参数）
+    ok, out = run_step(f'"{sys.executable}" "{REPORT_PY}" --subdir "{args.subdir}"', cwd=HERE)
+    if not ok or not os.path.exists(report_file):
+        print("[final][ERROR] 报告生成失败，末尾输出:")
+        for l in (out or "").strip().splitlines()[-5:]:
+            print("    " + l)
+        return 1
+
+    print(f"[final] 最终报告已生成: report/{args.subdir}/report_{args.subdir}.txt")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="扫描 #define 宏取值，最大化 Accuracy")
     ap.add_argument("--define", default="MIDDLE_THRESHOLD", help="宏名（默认 MIDDLE_THRESHOLD）")
@@ -589,7 +665,12 @@ def main():
     ap.add_argument("--stage1", action="store_true")
     ap.add_argument("--stage2", action="store_true")
     ap.add_argument("--stage3", action="store_true")
+    ap.add_argument("--final", action="store_true",
+                    help="扫描结束后：用当前 def 最优值最后跑一遍并重新生成报告")
     args = ap.parse_args()
+
+    if args.final:
+        return final_run(args)
 
     if args.values:
         vals = [float(v) for v in args.values.split(",") if v.strip()]
