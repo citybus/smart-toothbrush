@@ -34,13 +34,24 @@ static const short FaceRollBound[2][2][3] = {
 #define WIN16_INV_SIZE    0.0625f            
 #define TH                15
 #define FACETH            30
+#define FACETH2           0
 #define THRESHHOLDYUP     45
+#define ANCHOR8_D_TIME    1.0
 #define ANCHOR8_HOLD_TIME 3.5
 #define MIDDLE_THRESHOLD  30
+#define FD_TIME           0.25
 #define ACCY_THRESHOLD    0.3
 #define YYAW_THRESHOLD     6
-#define FD_TIME           0.25
 #define JUSTSUM_TIME      1.0
+unsigned short th = TH;
+unsigned short faceth = FACETH;
+unsigned short thresholdyup = THRESHHOLDYUP;
+float anchor8_hold_time = ANCHOR8_HOLD_TIME;
+unsigned short middle_threshold = MIDDLE_THRESHOLD;
+float fd_time = FD_TIME;
+float accy_threshold = ACCY_THRESHOLD;
+unsigned short yyaw_threshold = YYAW_THRESHOLD;
+float justsum_time = JUSTSUM_TIME;
 
 static inline void win16_update3_var(
     float *bx, float *by, float *bz,  /* per-axis ring buffers, length >= 16 */
@@ -183,7 +194,7 @@ static float yyaw = 0.0f;
 float lastyyaw = 0.0f;
 float platformy = 0.0f, platformyp = 0.0f;
 float platformystore = 0.0f, platformypstore = 0.0f;
-float anchory8sum1 = 0.0f;
+float anchory8sum1 = 0.0f, anchory8sum = 0.0f;
 float justsum = 0.0f;
 float V1 = 0.0f,V2 = 0.0f,V3 = 0.0f,V4 = 0.0f,V5 = 0.0f,V6 = 0.0f,V7 = 0.0f,V8 = 0.0f;
 float V9 = 0.0f,V10 = 0.0f,V11 = 0.0f,V12 = 0.0f,V13 = 0.0f,V14 = 0.0f,V15 = 0.0f,V16 = 0.0f;
@@ -209,9 +220,9 @@ float prob_dy     = 0.0f;
 float anchor8keeppp  = 0.0f, anchor8keep  = 0.0f, anchor8keepp  = 0.0f;
 unsigned short valid = 0;
 unsigned short anchory8flag1 = 0;
-unsigned short faceflag = 0, faceflag3 = 0;
+unsigned short faceflag = 0,  faceflag2 = 0, faceflag3 = 0;
 unsigned short middle_flag = 0;   
-unsigned short temp999 = 999;
+unsigned short gfface = 1, checkgf = 0;
 unsigned int deltatime = 0;
 unsigned short lr = 0;
 unsigned short newface = 1, oldface = 1, face = 1;
@@ -293,16 +304,16 @@ void pre(void)
 		{	
 		force_off[1] = forceymean;
 
-    if (acc[1] > ACCY_THRESHOLD)			
+    if (acc[1] > accy_threshold)			
     {
 		face = 2;newface = 2;lr = 1;
 		}		
-    if (acc[1] < -ACCY_THRESHOLD)			
+    if (acc[1] < -accy_threshold)			
     {
 		face = 1;newface = 1;lr = 0;
 		}		
 		lastyyaw = yyaw;		
-    temp999 = 0;	
+    gfface = 0;	
 		}
 }
 
@@ -380,32 +391,110 @@ void go(void) {
 					    	
 	#ifdef SUPPORTY 
 	const float dy = angle_delta_deg(yyaw, lastyyaw);
-	prob_dy = rampf(fabs(dy), 0.0f, (float)YYAW_THRESHOLD) * (dy >= 0.0f ? -1.0f : 1.0f);
-    if (acc[1] > ACCY_THRESHOLD)
+	prob_dy = rampf(fabs(dy), 0.0f, (float)yyaw_threshold) * (dy >= 0.0f ? -1.0f : 1.0f);
+    if (acc[1] > accy_threshold)
 		{
-		if ((dy > YYAW_THRESHOLD))	 		 
-    { 	
-			lr = 1;temp999 = 1;
+		if ((dy > yyaw_threshold))	 		 
+    { if ((lr == 1) && (gfface > 9))
+	    checkgf = 1;	
+			lr = 1;gfface = 2;
     }			
-	  if ((dy < -YYAW_THRESHOLD))	 		 
-    { 		                                             
-			lr = 0;temp999 = 2;
+	  if ((dy < -yyaw_threshold))	 		 
+    { if ((lr == 0) && (gfface > 9))
+	    checkgf = 1;		                                             
+			lr = 0;gfface = 1;
     }
 	}	
 			
-	if (acc[1] < -ACCY_THRESHOLD) 
+	if (acc[1] < -accy_threshold) 
 	{
-		if ((dy > YYAW_THRESHOLD))		 
-    { 	                                                 	
-			lr = 0;temp999 = 3;
+		if ((dy > yyaw_threshold))		 
+    { if ((lr == 0) && (gfface > 9))
+	    checkgf = 1;
+			lr = 0;gfface = 1;
     }			
-	  if ((dy < -YYAW_THRESHOLD))	 		 
-    { 		
-			lr = 1;temp999 = 4;
+	  if ((dy < -yyaw_threshold))	 		 
+    { if ((lr == 1) && (gfface > 9))
+	    checkgf = 1;
+			lr = 1;gfface = 2;
     }
 	}	 
 	#endif
-	 
+
+ #ifdef ANCHOR8
+   if (force[1] > anchor8keeppp)
+	 {
+		 anchor8keeppp = force[1];	 
+		 anchor8keepp = anchor8keeppp;
+	 }
+   if (force[1] < anchor8keepp)
+		 anchor8keepp = force[1];	 
+
+	 if (fabs(force[1] - forceymean) < th)
+	   platformy = forceymean;	 
+	 if (fabs(force[1] - forceypmean) < th)
+	   platformyp = forceypmean;	 
+ 
+ if (((-(force[1] - platformy) >=  FACETH2) || (-(force[1] - platformyp) >=  FACETH2)) && (faceflag2 == 0))
+ faceflag2 = 1;
+ 
+ if (faceflag2 == 1)
+ anchory8sum = anchory8sum + delta_t;
+
+ if (anchory8sum >= ANCHOR8_D_TIME)
+ {
+ faceflag2 = 0;
+ anchory8sum = 0;
+ }
+		 
+ if (((platformystore == platformy) || (platformypstore == platformyp)) && (((force[1] - platformy) >  faceth) || ((force[1] - platformyp) >  faceth)) && (faceflag == 0) && (faceflag == 0)) 
+ faceflag = 1; 
+ 
+ if (faceflag == 1)
+ faceflag3 = 1;
+ 
+ if ((platformystore != platformy) && (platformypstore != platformyp))  
+ {
+ faceflag = 0;
+ faceflag2 = 0;
+ }
+ 
+ platformystore = platformy;
+ platformypstore = platformyp; 
+ 
+	 if (((anchor8keeppp - platformy) > thresholdyup))	 
+	 anchory8flag1 = 1;
+
+	 if (anchory8flag1 == 1)
+	 anchory8sum1 = anchory8sum1 + delta_t;
+
+	 if (anchory8sum1 > anchor8_hold_time)
+	 {
+    anchory8flag1 = 0;
+	  anchory8sum1 = 0.0f;			
+		{
+		if (acc[1] > 0.0f)				
+    valid = 1;
+		
+		if (acc[1] < -0.0f)			
+    valid = 2;
+	  }			
+		
+		if (faceflag3 == 1)
+		{
+			if (acc[1] > 0.0f)			
+      valid = 2;
+
+		  if (acc[1] < -0.0f)			
+      valid = 1;
+	  }
+		anchor8keepp = 100.0f;//low 2nd reset
+		anchor8keeppp = -100.0f;//high 2nd reset
+		faceflag3 = 0;
+	 }
+	 valid_setface_debounce(valid);
+ #endif
+
 			/* Face zone selection by roll angle.
 			 *
 			 * Historical 12 SURFACER macros have been collapsed into the
@@ -437,30 +526,27 @@ void go(void) {
 					if      ((roll <  (upP - DR)) && (roll >  (-upN + DR))) face = 2;
 					else if ((roll <  (sdP - DR)) && (roll >  (upP + DR))) face = 4;
 					else if ((roll < (-upN - DR)) && (roll >  (-sdN + DR))) face = 6;
-					else if (((roll < 180) && (roll >  (dnP + DR))) ||
-					         ((roll < (-dnN - DR)) && (roll > -180)))   face = 8;
+					else if (((roll < 180.0f) && (roll >  (dnP + DR))) ||
+					         ((roll < (-dnN - DR)) && (roll > -180.0f)))   face = 8;
 					else if ((roll >  (sdP + DR)) && (roll <  (dnP - DR))) face = 10;
 					else if ((roll > (-dnN + DR)) && (roll <  (-sdN - DR))) face = 12;
 				} else {
 					if      ((roll <  (upP - DR)) && (roll >  (-upN + DR))) face = 1;
 					else if ((roll < (-upN - DR)) && (roll >  (-sdN + DR))) face = 3;
 					else if ((roll <  (sdP - DR)) && (roll >  (upP + DR))) face = 5;
-					else if (((roll < 180) && (roll >  (dnP + DR))) ||
-					         ((roll < (-dnN - DR)) && (roll > -180)))   face = 7;
+					else if (((roll < 180.0f) && (roll >  (dnP + DR))) ||
+					         ((roll < (-dnN - DR)) && (roll > -180.0f)))   face = 7;
 					else if ((roll > (-dnN + DR)) && (roll <  (-sdN - DR))) face = 9;
 					else if ((roll >  (sdP + DR)) && (roll <  (dnP - DR))) face = 11;
 				}
 			}
 			  
-  if (((int)(pitch) <  MIDDLE_THRESHOLD) && ((int)(pitch) > -MIDDLE_THRESHOLD) &&
+  if (((int)(pitch) <  middle_threshold) && ((int)(pitch) > -middle_threshold) &&
         (roll < MID_ENTER_ROLL_MAX) && (roll > MID_ENTER_ROLL_MIN))
-	{
 		 middle_flag = 1;
-	}
-	else if (((int)(pitch) < -MIDDLE_THRESHOLD * 1.2f) || ((int)(pitch) > MIDDLE_THRESHOLD * 1.2f))
-	{
+	
+	else if (((int)(pitch) < -middle_threshold * 1.2f) || ((int)(pitch) > middle_threshold * 1.2f))
 		 middle_flag = 0;
-	}
 
 	if (middle_flag == 1)
 	{
@@ -476,79 +562,10 @@ void go(void) {
 
 	 if (oldface != face)
 		 fd_flag = 1;
-	 face_debounce(delta_t, face, FD_TIME, &fd_flag, &fd_sum, &newface);
-
- #ifdef ANCHOR8
-   if (force[1] > anchor8keeppp)
-	 {
-		 anchor8keeppp = force[1];	 
-		 anchor8keepp = anchor8keeppp;
-	 }
-   if (force[1] < anchor8keepp)
-		 anchor8keepp = force[1];	 
-
-	 if (fabs(force[1] - forceymean) < TH)
-	   platformy = forceymean;	 
-	 if (fabs(force[1] - forceypmean) < TH)
-	   platformyp = forceypmean;	 
- 
- if (((platformystore == platformy) || (platformypstore == platformyp)) && (((force[1] - platformy) >  FACETH) || ((force[1] - platformyp) >  FACETH)) && (faceflag == 0))
- { 
- faceflag = 1;
- }
-
- if (faceflag == 1)
-	 faceflag3 = 1;
-
- if ((platformystore != platformy) && (platformypstore != platformyp))  
- {
- faceflag = 0;
- }
- 
- platformystore = platformy;
- platformypstore = platformyp; 
- 
-	 if (((anchor8keeppp - platformy) > THRESHHOLDYUP))	 
-	 {anchory8flag1 = 1;
-	 }
-	 if (anchory8flag1 == 1)
-	 {anchory8sum1 = anchory8sum1 + delta_t;
-	 }
-	 if (anchory8sum1 > ANCHOR8_HOLD_TIME)
-	 {
-    anchory8flag1 = 0;
-	  anchory8sum1 = 0.0f;			
-		{
-		if (acc[1] > 0.0f)				
-    {
-    valid = 1;
-		}
-		if (acc[1] < -0.0f)			
-    {
-    valid = 2;
-		}		
-	  }			
-		
-		if (faceflag3 == 1)
-		{
-			if (acc[1] > 0.0f)			
-    {
-    valid = 2;
-		}
-		if (acc[1] < -0.0f)			
-    {
-    valid = 1;
-		}		
-	  }
-		anchor8keepp = 100;//low 2nd reset
-		anchor8keeppp = -100;//high 2nd reset
-		faceflag3 = 0;
-	 }
- #endif 		
+	 face_debounce(delta_t, face, fd_time, &fd_flag, &fd_sum, &newface);	 
 	 }  /* end if (ps == 3) */
-	 valid_setface_debounce(valid);
 	 justsum = justsum + delta_t;
-	 if (justsum > JUSTSUM_TIME)
+	 if (justsum > justsum_time)
 	 {
 	  lastyyaw = yyaw;
     justsum = 0.0f;		 
@@ -590,9 +607,27 @@ float get_dt(void)
 #endif
 				
 void setface(short face)
-{
+{ if ((lr == (face - 1)) && (gfface < 9))
+	checkgf = 1;
 	lr = face - 1;
+	gfface = 10 * (lr == 0 ? 1 : 2);
 	return;
+}
+
+void setpara(unsigned short th_f,unsigned short faceth_f,
+unsigned short thresholdyup_f,float anchor8_hold_time_f,
+unsigned short middle_threshold_f,float fd_time_f,
+float accy_threshold_f,unsigned short yyaw_threshold_f,float justsum_time_f)
+{
+th = th_f;
+faceth = faceth_f;
+thresholdyup = thresholdyup_f;
+anchor8_hold_time = anchor8_hold_time_f;
+middle_threshold = middle_threshold_f;
+fd_time = fd_time_f;
+accy_threshold = accy_threshold_f;
+yyaw_threshold = yyaw_threshold_f;
+justsum_time = justsum_time_f;
 }
 
 void init(void)
@@ -615,22 +650,22 @@ void init(void)
 void post(void)
 {
   V1 = face;//delta_t * 1000;
-  V2 = newface;
+  V2 = newface;//不能动！！！
   V3 = yaw;
   V4 = lr * 100 + ps * 1; 
   V5 = pitch;
   V6 = roll;
   V7 = yyaw;
-  V8 = valid;
+  V8 = lastyyaw;
   V9 = anchory8flag1;
   V10 = faceflag3;
   V11 = middle_flag;
-  V12 = 0;
-  V13 = 0;
-  V14 = 0;
-  V15 = 0;
-  V16 = temp999;	
-  temp999 = 0;		
+  V12 = acc[1] * 10;
+  V13 = faceflag2;//faceflag3;
+  V14 = faceflag;
+  V15 = platformy;//checkgf;
+  V16 = gfface;	
+	checkgf = 0;
 }
 	
 short alg_toothbrush_update(float *accVal, float *gyroVal, short pressState, float *forceVal, short *area, short *area2, short *area3, short *para)	
