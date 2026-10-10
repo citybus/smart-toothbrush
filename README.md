@@ -114,12 +114,13 @@ input目录输入数据格式
 * per-file模式 每个数据文件独自优化到最佳参数
 * face 优化的首要目标是牙面准确度占比最高，次要目标是时间
 * time 优化的首要目标是时间准确度占比最高，次要目标是牙面
+* LOOP 循环执行次数
 
-参数扫描结束后，参数分别保存在output目录.face.def文件和.time.def文件中。实际工程中，第一步是使用overall模式，即所有数据文件使用同一组参数，因为不论是overall模式还是per-file模式都是基于已知前述刷牙顺序的条件下进行的参数扫描，而实际用户刷牙顺序是未知的，所以原理是，通过大量具有代表性的输入数据文件中扫描一组最佳参数，去测算实际用户未知的刷牙顺序。
+参数扫描结束后，参数分别保存在output目录.face.def文件和.time.def文件中，同时在report目录生成报告和扫描过程记录文件。实际工程中，第一步是使用overall模式，即所有数据文件使用同一组参数，因为不论是overall模式还是per-file模式都是基于已知前述刷牙顺序的条件下进行的参数扫描，而实际用户刷牙顺序是未知的，所以原理是，通过大量具有代表性的输入数据文件中扫描一组最佳参数，去测算实际用户未知的刷牙顺序。第二步使用自学习算法，形成用户个性化参数。
 
 #### 使用步骤
 
-1. 设置扫描模式和优化目标
+1. 设置扫描模式和优化目标（sweep_define.def，run_sweep_all.py）
 2. python .\simulator\run_sweep_all.py
 
 ```
@@ -135,6 +136,13 @@ input目录输入数据格式
 <br>
 <img src="content/overall-output.jpg" width="760">
 <br>
+
+算法支持门齿的自学习，尚在完善中，使用方法如下，
+
+```
+ python .\simulator\run_sweep_all.py --stage1 5 5
+```
+5 5意思是扫描sweep_define.def文件中从第5行到第5行的参数，目前是MIDDLE_THRESHOLD。
 
 #### 报告分析
 
@@ -155,12 +163,20 @@ V2 = newface;
 .\simulator\run_all.bat
  python .\simulator\generate_report.py
 ```
+更简洁的方式
+
+```
+.\jni\build.bat
+.\simulator\build.bat
+.\simulator\run.bat
+ python .\simulator\generate_report.py
+```
 
 生成report如下，
 <br>
 <img src="content/overall-report.jpg" width="760">
 <br>
-可以看到overall模式下，以time为优化目标，基于12组刷牙数据，牙面准确率81.02%，时间准确率69.59%，这是优化了3次，即运行3遍run_sweep_all.py脚本的结果。下面是分文件的准确率。
+可以看到overall模式下，以time为优化目标，基于12组刷牙数据，牙面准确率81.02%，时间准确率69.59%，这是优化了3次，即运行3遍run_sweep_all.py脚本的结果。下面是分文件的准确率。(由于代码变化，实际数值可能不同)
 
 如果我们选择per-file模式，以time为优化目标，优化3次，生成report如下，
 <br>
@@ -189,9 +205,9 @@ V2 = newface;
 |<>|持续的行数|
 |{}|该位置正确的牙面号|
 |x|该牙面号错误|
-|+|应该属于前一位置|
-|-|应该属于后一位置|
-|,|2个Pos之间，既不属于前一Pos，也不属于后一Pos|
+|+|应该属于前一位置，有bug|
+|-|应该属于后一位置，有bug|
+|(())|属于前一Pos|
 |Total count|识别正确行数|
 
 #### 源码说明
@@ -204,8 +220,6 @@ V2 = newface;
 * #define ANCHOR8 启用Y轴应力算法           
 * #define SIMSIM 仿真使用，实际使用要注释，使用get_dt()函数   
 * #define SUPPORTY 启用陀螺算法
-
-如果项目不包含IMU，有加计和应力，可以注释掉SUPPORTY。
 
 应力部分相关参数
 * #define TH                15
@@ -242,8 +256,7 @@ void post(void)
   V13 = 0;
   V14 = 0;
   V15 = 0;
-  V16 = temp999;	
-  temp999 = 0;		
+  V16 = 0;			
 }
 ```
 
