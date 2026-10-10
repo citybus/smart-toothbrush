@@ -1,6 +1,7 @@
 clear;
 %左外->右内->-左外->右外->左外->左内->右内->左内->右外->左内->左上咀嚼面->右上咀嚼面->右下咀嚼面->左下咀嚼面->中上外侧->中上内侧->中下外侧->中下内侧
-datafile = '..\output\N1\20250515_102003_2.txt';
+%1 2 1 2 1 1 2 1 2 1 1 2 2 1 1 1 1 1
+datafile = '..\output\N1\20250515_102003_3.txt';
 % readmatrix requires R2019a+; fall back to dlmread on older releases (R2018b)
 if exist('readmatrix', 'file')
     D = readmatrix(datafile);
@@ -134,16 +135,20 @@ end%%%%
 figure (101)
 plot(t(1 : L - len + 1),FY(1 : L - len + 1),'g*');
 hold on
+%plot(t(1 : L - len + 1),FZ(1 : L - len + 1),'b*');
+%hold on
 plot(t(1 : L - len + 1),V2(1 : L - len + 1) * 10,'k*');
 hold on
-plot(t(1 : L - len + 1),V5(1 : L - len + 1) * 1,'r>');
+plot(t(1 : L - len + 1),V9(1 : L - len + 1) * -100,'r*');
 hold on
-plot(t(1 : L - len + 1),V6(1 : L - len + 1) * 1,'b>');
+%plot(t(1 : L - len + 1),V10(1 : L - len + 1) * -90,'b*');
+%hold on
+plot(t(1 : L - len + 1),V13(1 : L - len + 1) * -30,'y*');
 hold on
-plot(t(1 : L - len + 1),V11(1 : L - len + 1) * -20,'y>');
+%plot(t(1 : L - len + 1),V14(1 : L - len + 1) * -80,'b*');
+%hold on
+plot(t(1 : L - len + 1),V15(1 : L - len + 1) * 1,'b*');
 hold on
-
-
 
 % k     b    c    g     m        r   w     y
 % black blue cyan green magnenta red white yellow
