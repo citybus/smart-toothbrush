@@ -217,7 +217,7 @@ float forceybuf[128] = {0.0f}, forcezbuf[128] = {0.0f};
 float forceysum = 0.0f, forcezsum = 0.0f;
 float forceymean = 0.0f, forcezmean = 0.0f, forceypmean = 0.0f;
 float prob_dy     = 0.0f;  
-float anchor8keeppp  = 0.0f, anchor8keep  = 0.0f, anchor8keepp  = 0.0f;
+float anchor8keeppp = 0.0f, anchor8keep = 0.0f, anchor8keepp = 0.0f;
 unsigned short valid = 0;
 unsigned short anchory8flag1 = 0;
 unsigned short faceflag = 0,  faceflag2 = 0, faceflag3 = 0;
