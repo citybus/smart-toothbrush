@@ -221,7 +221,7 @@ V2 = newface;
 * #define SIMSIM 仿真使用，实际使用要注释，使用get_dt()函数   
 * #define SUPPORTY 启用陀螺算法
 
-应力部分相关参数
+应力相关参数
 * #define TH                15
 * #define FACETH            30
 * #define THRESHHOLDYUP     45
@@ -236,7 +236,7 @@ V2 = newface;
 * #define YYAW_THRESHOLD     6
 * #define JUSTSUM_TIME      1.0
 
-imu安装角度相关，为了更好采集Y轴应力，imu和应力传感器倾斜了45度角。
+imu安装角度相关，为了更好采集Y轴应力，imu和应力传感器（有些imu自带多通道应力传感器）倾斜了45度角。
 ```
   roll = roll - 45.0f;
   if (roll <= -180.0f)
